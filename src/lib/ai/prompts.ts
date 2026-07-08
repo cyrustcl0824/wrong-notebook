@@ -642,3 +642,115 @@ export function generateReanswerPrompt(
     provider_hints: options?.providerHints || ''
   }).trim();
 }
+
+// ========================================
+// 新功能：题库提取 Prompt
+// ========================================
+
+export const DEFAULT_EXTRACT_TEMPLATE = `【角色与核心任务】
+你是一位专业的K12教育题目解析专家。你的任务是分析提供的试卷/教材页面图片，从中提取所有独立的题目，并进行结构化输出。
+
+{{subject_hint}}
+
+【核心输出要求】
+你的响应**必须严格遵循以下自定义标签格式**。**严禁**使用 JSON 或 Markdown 代码块。
+
+请按照以下结构输出：
+
+<subject>
+在此处填写学科，必须是以下之一："数学", "物理", "化学", "生物", "英语", "语文", "历史", "地理", "政治", "其他"。
+</subject>
+
+<questions>
+对页面中的每道题目，使用以下子标签重复输出。每道题用 <question> 和 </question> 包裹。
+
+<question>
+<question_number>题号（页内序号，从1开始）</question_number>
+<question_text>题目完整文本。数学公式使用 LaTeX（行内 $...$，块级 $$...$$）。包含选项内容（如果是选择题）。</question_text>
+<question_type>题型：choice（选择题）、fill_blank（填空题）、true_false（判断题）、short_answer（简答题）、essay（解答题/应用题）</question_type>
+<options>如果是选择题，列出选项，每行一个，如：A. 选项一\\nB. 选项二\\nC. 选项三\\nD. 选项四。非选择题留空。</options>
+<correct_answer>标准答案。选择题填选项字母（如 A），填空题填答案，解答题填简要答案。</correct_answer>
+<analysis>解题解析。使用简体中文和 LaTeX 公式。</analysis>
+<knowledge_points>知识点，逗号分隔，如：知识点1, 知识点2</knowledge_points>
+<difficulty>难度：easy、medium、hard</difficulty>
+</question>
+
+（重复上述 <question> 块直到所有题目提取完毕）
+
+</questions>
+
+【!!! 关键格式与内容约束 !!!】
+1. **格式严格**：必须包含 <subject> 和 <questions> 标签，每个题目用 <question> 包裹。
+2. **完整性**：必须提取页面中的所有题目，不要遗漏。
+3. **纯文本**：内容作为纯文本处理，不要转义反斜杠。
+4. **题号**：question_number 是页内序号，从1开始递增。
+5. **公式**：数学公式直接使用 LaTeX 符号（如 $\\frac{1}{2}$），不要 JSON 转义。
+6. 如果图片中没有题目（如封面、目录页），输出 <questions></questions> 并在 <subject> 中填 "其他"。`;
+
+/**
+ * 生成题库提取提示词
+ */
+export function generateExtractPrompt(subject?: string | null): string {
+  const subjectHint = subject
+    ? `本题库学科：${subject}。请按该学科的题目特点进行提取。`
+    : '请根据图片内容自动判断学科。';
+
+  return replaceVariables(DEFAULT_EXTRACT_TEMPLATE, {
+    subject_hint: subjectHint,
+  }).trim();
+}
+
+// ========================================
+// 新功能：拍照批改 Prompt
+// ========================================
+
+export const DEFAULT_CORRECTION_TEMPLATE = `【角色与核心任务】
+你是一位专业的K12教师，擅长批改学生作业。你的任务是分析提供的作业图片，识别每道题目和学生手写答案，判断对错，并给出解析。
+
+【核心输出要求】
+你的响应**必须严格遵循以下自定义标签格式**。**严禁**使用 JSON 或 Markdown 代码块。
+
+请按照以下结构输出：
+
+<subject>
+在此处填写学科，必须是以下之一："数学", "物理", "化学", "生物", "英语", "语文", "历史", "地理", "政治", "其他"。
+</subject>
+
+<questions>
+对页面中的每道题目，使用以下子标签输出。每道题用 <question> 和 </question> 包裹。
+
+<question>
+<question_number>题号（页内序号，从1开始）</question_number>
+<question_text>题目完整文本。数学公式使用 LaTeX。包含选项内容（如果是选择题）。</question_text>
+<question_type>题型：choice、fill_blank、true_false、short_answer、essay</question_type>
+<student_answer>学生手写答案。尽量原样转录学生的作答内容。如果未作答，填 "未作答"。</student_answer>
+<correct_answer>标准答案。</correct_answer>
+<is_correct>对错判断：true（正确）、false（错误）、unattempted（未作答）</is_correct>
+<analysis>解析。如果学生答错，分析错误原因；如果答对，给出正确解法。使用简体中文和 LaTeX。</analysis>
+</question>
+
+（重复上述 <question> 块直到所有题目批改完毕）
+
+</questions>
+
+<summary>
+<total>总题数</total>
+<correct>答对题数</correct>
+<wrong>答错题数</wrong>
+<unattempted>未作答题数</unattempted>
+</summary>
+
+【!!! 关键格式与内容约束 !!!】
+1. **格式严格**：必须包含 <subject>、<questions> 和 <summary> 标签。
+2. **手写识别**：尽力识别学生手写内容，不确定的用 [?] 标注。
+3. **纯文本**：内容作为纯文本处理，不要转义反斜杠。
+4. **公式**：数学公式直接使用 LaTeX 符号。
+5. **判断标准**：只有完全正确才判 true；部分正确或计算错误判 false；空白或只写了题目编号判 unattempted。
+6. 如果无法识别题目或答案，仍然输出 <question> 块，在相关字段填 "无法识别"。`;
+
+/**
+ * 生成拍照批改提示词
+ */
+export function generateCorrectionPrompt(): string {
+  return DEFAULT_CORRECTION_TEMPLATE.trim();
+}

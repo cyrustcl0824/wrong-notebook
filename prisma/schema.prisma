@@ -2,7 +2,7 @@
 // learn more about it in the docs: https://pris.ly/d/prisma-schema
 
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
   binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
 }
 
@@ -22,37 +22,45 @@ model User {
   educationStage String? // primary, junior_high, senior_high, university
   enrollmentYear Int?
 
-  role      String   @default("user") // "admin" or "user"
-  isActive  Boolean  @default(true)   // 用户是否启用
+  role     String  @default("user") // "admin" or "user"
+  isActive Boolean @default(true) // 用户是否启用
 
-  errorItems ErrorItem[]
-  subjects   Subject[]
+  errorItems      ErrorItem[]
+  subjects        Subject[]
   practiceRecords PracticeRecord[]
-  customTags KnowledgeTag[] // User's custom tags
+  customTags      KnowledgeTag[] // User's custom tags
+
+  // === 新功能反向关联 ===
+  questionBanks         QuestionBank[]
+  pinyinCharacters      PinyinCharacter[]
+  pinyinPracticeRecords PinyinPracticeRecord[]
+  correctionSessions    CorrectionSession[]
 }
 
 // 统一知识点标签表 (支持无限层级)
 model KnowledgeTag {
-  id        String   @id @default(cuid())
-  name      String   // 标签名，如 "勾股定理"
-  subject   String   // 学科，如 "math", "english"
+  id      String @id @default(cuid())
+  name    String // 标签名，如 "勾股定理"
+  subject String // 学科，如 "math", "english"
 
   // 层级控制 (邻接表模式)
-  parentId  String?
-  parent    KnowledgeTag?  @relation("TagHierarchy", fields: [parentId], references: [id], onDelete: SetNull)
-  children  KnowledgeTag[] @relation("TagHierarchy")
+  parentId String?
+  parent   KnowledgeTag?  @relation("TagHierarchy", fields: [parentId], references: [id], onDelete: SetNull)
+  children KnowledgeTag[] @relation("TagHierarchy")
 
   // 排序与编码
-  order     Int      @default(0) // 用于保持教材顺序
-  code      String?              // 如 "1.2.1"
+  order Int     @default(0) // 用于保持教材顺序
+  code  String? // 如 "1.2.1"
 
   // 区分系统预设 vs 用户自定义
-  isSystem  Boolean  @default(false)
-  userId    String?  // 如果是用户自定义标签，绑定 userId
-  user      User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  isSystem Boolean @default(false)
+  userId   String? // 如果是用户自定义标签，绑定 userId
+  user     User?   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   // 与错题的多对多关系
   errorItems ErrorItem[]
+  // 与题库题目的多对多关系
+  questions  Question[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -79,15 +87,15 @@ model Subject {
 }
 
 model ErrorItem {
-  id             String   @id @default(cuid())
-  userId         String
-  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  subjectId      String?
-  subject        Subject? @relation(fields: [subjectId], references: [id], onDelete: Cascade)
-  
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  subjectId String?
+  subject   Subject? @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+
   originalImageUrl String
   ocrText          String?
-  
+
   // AI Analysis
   questionText     String? // Parsed question
   answerText       String? // AI provided answer
@@ -99,43 +107,211 @@ model ErrorItem {
   geogebraCommands String? // GeoGebra commands for interactive demo (JSON or newline-separated)
 
   // New: many-to-many relation with KnowledgeTag
-  tags             KnowledgeTag[]
-  
+  tags KnowledgeTag[]
+
   // User Metadata
-  source           String? // e.g. "Midterm Exam"
-  errorType        String? // e.g. "Calculation", "Concept"
-  userNotes        String?
-  
-  masteryLevel     Int     @default(0) // 0: New, 1: Reviewing, 2: Mastered
-  gradeSemester    String? // e.g. "Junior High Grade 2, 1st Semester"
-  paperLevel       String? // e.g. "A", "B", "Other"
-  
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  source    String? // e.g. "Midterm Exam"
+  errorType String? // e.g. "Calculation", "Concept"
+  userNotes String?
+
+  masteryLevel  Int     @default(0) // 0: New, 1: Reviewing, 2: Mastered
+  gradeSemester String? // e.g. "Junior High Grade 2, 1st Semester"
+  paperLevel    String? // e.g. "A", "B", "Other"
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   reviewSchedules ReviewSchedule[]
+
+  // === 新功能关联：拍照批改手动归档 ===
+  correctionSessionId String?
+  correctionSession   CorrectionSession? @relation(fields: [correctionSessionId], references: [id], onDelete: SetNull)
 }
 
 model ReviewSchedule {
   id          String    @id @default(cuid())
   errorItemId String
   errorItem   ErrorItem @relation(fields: [errorItemId], references: [id], onDelete: Cascade)
-  
+
   scheduledFor DateTime
   completedAt  DateTime?
   isCorrect    Boolean? // Result of the review
-  
-  createdAt    DateTime @default(now())
+
+  createdAt DateTime @default(now())
 }
 
 model PracticeRecord {
-  id        String   @id @default(cuid())
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
-  subject   String?  // e.g. "Math", "Physics"
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  subject    String? // e.g. "Math", "Physics"
   difficulty String? // "easy", "medium", "hard", "harder"
-  isCorrect Boolean?
-  
+  isCorrect  Boolean?
+
   createdAt DateTime @default(now())
+}
+
+// ========================================
+// P0: 题库资料功能
+// ========================================
+
+model QuestionBank {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  title      String // 题库名称，如 "五年级数学期中试卷"
+  subject    String // 学科：math, chinese, english, etc.
+  gradeLevel String? // 年级：如 "grade_5"
+
+  // PDF 文件
+  pdfUrl         String // PDF 文件存储路径
+  pdfFileName    String // 原始文件名
+  totalPageCount Int    @default(0) // PDF 总页数
+  processedPages Int    @default(0) // 已处理页数
+
+  // 处理状态
+  status       String  @default("pending") // pending, processing, ready, failed
+  errorMessage String?
+
+  questions Question[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@index([subject])
+}
+
+model Question {
+  id             String       @id @default(cuid())
+  questionBankId String
+  questionBank   QuestionBank @relation(fields: [questionBankId], references: [id], onDelete: Cascade)
+
+  // 题目位置
+  pageNumber     Int // PDF 中的页码
+  questionNumber Int // 页内题号
+
+  // 题目内容
+  questionText  String // 题目文本
+  questionType  String // choice, fill_blank, true_false, short_answer, essay
+  options       String? // JSON string: ["A. ...", "B. ...", ...]
+  correctAnswer String? // 标准答案
+  analysis      String? // 解析
+
+  // 分类标签
+  difficulty String         @default("medium") // easy, medium, hard
+  tags       KnowledgeTag[] // 知识点标签（多对多）
+
+  // 原始图片
+  pageImageUrl String? // 对应 PDF 页面图片（用于展示原题上下文）
+
+  // 相似题关联
+  similaritiesFrom QuestionSimilarity[] @relation("SimilarFrom")
+  similaritiesTo   QuestionSimilarity[] @relation("SimilarTo")
+
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  PinyinCharacter PinyinCharacter[]
+
+  @@index([questionBankId])
+  @@index([questionType])
+  @@index([difficulty])
+}
+
+model QuestionSimilarity {
+  id                String   @id @default(cuid())
+  questionId        String
+  question          Question @relation("SimilarFrom", fields: [questionId], references: [id], onDelete: Cascade)
+  similarQuestionId String
+  similarQuestion   Question @relation("SimilarTo", fields: [similarQuestionId], references: [id], onDelete: Cascade)
+
+  similarityType  String // "same_knowledge" | "ai_generated"
+  similarityScore Float  @default(0) // 0-1, 相似度分数
+
+  createdAt DateTime @default(now())
+
+  @@unique([questionId, similarQuestionId])
+}
+
+// ========================================
+// P1: 拼音打字练习功能
+// ========================================
+
+model PinyinCharacter {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  character  String // 单个汉字
+  pinyin     String // 拼音（带声调标记，如 "mā"）
+  tone       Int // 声调：1,2,3,4,0(轻声)
+  sourceText String? // 提取该字的原始句子上下文
+
+  // 来源题目（可选）
+  sourceQuestionId String?
+  sourceQuestion   Question? @relation(fields: [sourceQuestionId], references: [id], onDelete: SetNull)
+
+  // 练习统计
+  practiceCount Int @default(0)
+  correctCount  Int @default(0)
+  masteryLevel  Int @default(0) // 0: 新字, 1: 练习中, 2: 已掌握
+
+  practiceRecords PinyinPracticeRecord[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, character])
+  @@index([userId, masteryLevel])
+}
+
+model PinyinPracticeRecord {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  characterId String
+  character   PinyinCharacter @relation(fields: [characterId], references: [id], onDelete: Cascade)
+
+  userInput      String // 用户输入的拼音
+  isCorrect      Boolean
+  responseTimeMs Int? // 响应时间（毫秒）
+
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([characterId])
+}
+
+// ========================================
+// P2: 拍照批改功能
+// ========================================
+
+model CorrectionSession {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // 上传的作业图片
+  imageUrl      String
+  imageFileName String?
+
+  // 处理状态
+  status       String  @default("pending") // pending, processing, completed, failed
+  errorMessage String?
+
+  // AI 批改结果（JSON string）
+  // 结构：{ questions: [{ questionText, studentAnswer, isCorrect, correctAnswer, analysis, questionType }] }
+  result String?
+
+  // 手动归档的错题
+  errorItems ErrorItem[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@index([status])
 }

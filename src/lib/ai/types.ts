@@ -23,11 +23,55 @@ export interface GeogebraAnalysisResult {
     description: string;
 }
 
+// === 新功能：题库提取 ===
+
+export interface ExtractedQuestion {
+    questionNumber: number;
+    questionText: string;
+    questionType: string; // choice, fill_blank, true_false, short_answer, essay
+    options: string[];
+    correctAnswer: string;
+    analysis: string;
+    knowledgePoints: string[];
+    difficulty: string; // easy, medium, hard
+}
+
+export interface ExtractQuestionsResult {
+    questions: ExtractedQuestion[];
+    subject: string;
+}
+
+// === 新功能：拍照批改 ===
+
+export interface CorrectedQuestion {
+    questionNumber: number;
+    questionText: string;
+    questionType: string;
+    studentAnswer: string;
+    correctAnswer: string;
+    isCorrect: boolean;
+    analysis: string;
+}
+
+export interface CorrectionResult {
+    questions: CorrectedQuestion[];
+    subject: string;
+    summary: {
+        total: number;
+        correct: number;
+        wrong: number;
+        unattempted: number;
+    };
+}
+
 export interface AIService {
     analyzeImage(imageBase64: string, mimeType?: string, language?: 'zh' | 'en', grade?: 7 | 8 | 9 | 10 | 11 | 12 | null, subject?: string | null, gradeSemester?: string | null): Promise<ParsedQuestionFromSchema>;
     generateSimilarQuestion(originalQuestion: string, knowledgePoints: string[], language?: 'zh' | 'en', difficulty?: DifficultyLevel, gradeSemester?: string | null): Promise<ParsedQuestionFromSchema>;
     reanswerQuestion(questionText: string, language?: 'zh' | 'en', subject?: string | null, imageBase64?: string, gradeSemester?: string | null): Promise<ReanswerQuestionResult>;
     analyzeForGeogebra(questionText: string, answerText: string, analysis: string): Promise<GeogebraAnalysisResult>;
+    // === 新功能 ===
+    extractQuestionsFromImage(imageBase64: string, mimeType?: string, subject?: string | null): Promise<ExtractQuestionsResult>;
+    correctHomeworkImage(imageBase64: string, mimeType?: string): Promise<CorrectionResult>;
 }
 
 export interface AIConfig {

@@ -1,6 +1,6 @@
 import OpenAI from "openai";
-import { AIService, ParsedQuestion, DifficultyLevel, AIConfig, ReanswerQuestionResult, GeogebraAnalysisResult } from "./types";
-import { generateAnalyzePrompt, generateSimilarQuestionPrompt, generateGeogebraPrompt } from './prompts';
+import { AIService, ParsedQuestion, DifficultyLevel, AIConfig, ReanswerQuestionResult, GeogebraAnalysisResult, ExtractedQuestion, ExtractQuestionsResult, CorrectedQuestion, CorrectionResult } from "./types";
+import { generateAnalyzePrompt, generateSimilarQuestionPrompt, generateGeogebraPrompt, generateExtractPrompt, generateCorrectionPrompt } from './prompts';
 import { getAppConfig } from '../config';
 import { safeParseParsedQuestion } from './schema';
 import { getMathTagsFromDB, getTagsFromDB } from './tag-service';
@@ -536,6 +536,194 @@ export class OpenAIProvider implements AIService {
             }
         }
         throw new Error("AI_UNKNOWN_ERROR");
+    }
+
+    // === 新功能：题库提取 ===
+
+    /**
+     * 从图片中提取题目（用于题库 PDF 逐页处理）
+     */
+    async extractQuestionsFromImage(imageBase64: string, mimeType: string = "image/png", subject?: string | null): Promise<ExtractQuestionsResult> {
+        const systemPrompt = generateExtractPrompt(subject);
+
+        logger.info({
+            provider: 'OpenAI',
+            model: this.model,
+            imageSize: `${imageBase64.length} bytes`,
+            subject: subject || 'auto',
+        }, 'Extract Questions Request');
+
+        try {
+            const response = await this.openai.chat.completions.create({
+                model: this.model,
+                messages: [
+                    { role: "system", content: systemPrompt },
+                    {
+                        role: "user",
+                        content: [
+                            {
+                                type: "image_url",
+                                image_url: {
+                                    url: `data:${mimeType};base64,${imageBase64}`,
+                                },
+                            },
+                        ],
+                    },
+                ],
+                max_tokens: 8192,
+            });
+
+            const text = response.choices[0]?.message?.content || "";
+            if (!text) throw new Error("Empty response from AI");
+
+            logger.debug({ rawResponseLength: text.length }, 'Extract questions raw response');
+
+            return this.parseExtractResponse(text);
+        } catch (error) {
+            logger.error({ error: error instanceof Error ? error.message : String(error) }, 'Error during question extraction');
+            this.handleError(error);
+            throw error;
+        }
+    }
+
+    /**
+     * 解析题库提取响应
+     */
+    private parseExtractResponse(text: string): ExtractQuestionsResult {
+        const subject = this.extractTag(text, "subject") || "其他";
+
+        const questions: ExtractedQuestion[] = [];
+        const questionBlocks = text.match(/<question>([\s\S]*?)<\/question>/g) || [];
+
+        for (const block of questionBlocks) {
+            const questionNumber = parseInt(this.extractTag(block, "question_number") || "0", 10);
+            const questionText = this.extractTag(block, "question_text") || "";
+            const questionType = this.extractTag(block, "question_type") || "short_answer";
+            const optionsRaw = this.extractTag(block, "options") || "";
+            const correctAnswer = this.extractTag(block, "correct_answer") || "";
+            const analysis = this.extractTag(block, "analysis") || "";
+            const knowledgePointsRaw = this.extractTag(block, "knowledge_points") || "";
+            const difficulty = this.extractTag(block, "difficulty") || "medium";
+
+            const options = optionsRaw
+                .split(/\n/)
+                .map(o => o.trim())
+                .filter(o => o.length > 0);
+
+            const knowledgePoints = knowledgePointsRaw
+                .split(/[,，\n]/)
+                .map(k => k.trim())
+                .filter(k => k.length > 0);
+
+            questions.push({
+                questionNumber: questionNumber || questions.length + 1,
+                questionText,
+                questionType,
+                options,
+                correctAnswer,
+                analysis,
+                knowledgePoints,
+                difficulty,
+            });
+        }
+
+        logger.info({ subject, questionCount: questions.length }, 'Extracted questions parsed');
+
+        return { questions, subject };
+    }
+
+    // === 新功能：拍照批改 ===
+
+    /**
+     * 批改作业图片
+     */
+    async correctHomeworkImage(imageBase64: string, mimeType: string = "image/jpeg"): Promise<CorrectionResult> {
+        const systemPrompt = generateCorrectionPrompt();
+
+        logger.info({
+            provider: 'OpenAI',
+            model: this.model,
+            imageSize: `${imageBase64.length} bytes`,
+        }, 'Correction Request');
+
+        try {
+            const response = await this.openai.chat.completions.create({
+                model: this.model,
+                messages: [
+                    { role: "system", content: systemPrompt },
+                    {
+                        role: "user",
+                        content: [
+                            {
+                                type: "image_url",
+                                image_url: {
+                                    url: `data:${mimeType};base64,${imageBase64}`,
+                                },
+                            },
+                        ],
+                    },
+                ],
+                max_tokens: 8192,
+            });
+
+            const text = response.choices[0]?.message?.content || "";
+            if (!text) throw new Error("Empty response from AI");
+
+            logger.debug({ rawResponseLength: text.length }, 'Correction raw response');
+
+            return this.parseCorrectionResponse(text);
+        } catch (error) {
+            logger.error({ error: error instanceof Error ? error.message : String(error) }, 'Error during correction');
+            this.handleError(error);
+            throw error;
+        }
+    }
+
+    /**
+     * 解析批改响应
+     */
+    private parseCorrectionResponse(text: string): CorrectionResult {
+        const subject = this.extractTag(text, "subject") || "其他";
+
+        const questions: CorrectedQuestion[] = [];
+        const questionBlocks = text.match(/<question>([\s\S]*?)<\/question>/g) || [];
+
+        for (const block of questionBlocks) {
+            const questionNumber = parseInt(this.extractTag(block, "question_number") || "0", 10);
+            const questionText = this.extractTag(block, "question_text") || "";
+            const questionType = this.extractTag(block, "question_type") || "short_answer";
+            const studentAnswer = this.extractTag(block, "student_answer") || "未作答";
+            const correctAnswer = this.extractTag(block, "correct_answer") || "";
+            const isCorrectRaw = this.extractTag(block, "is_correct") || "unattempted";
+            const analysis = this.extractTag(block, "analysis") || "";
+
+            const isCorrect = isCorrectRaw === "true" ? true : isCorrectRaw === "false" ? false : null;
+
+            questions.push({
+                questionNumber: questionNumber || questions.length + 1,
+                questionText,
+                questionType,
+                studentAnswer,
+                correctAnswer,
+                isCorrect: isCorrect as any,
+                analysis,
+            });
+        }
+
+        // 解析摘要
+        const summaryBlock = text.match(/<summary>([\s\S]*?)<\/summary>/)?.[1] || "";
+        const total = parseInt(this.extractTag(summaryBlock, "total") || "0", 10) || questions.length;
+        const correct = parseInt(this.extractTag(summaryBlock, "correct") || "0", 10) || questions.filter(q => q.isCorrect === true).length;
+        const wrong = parseInt(this.extractTag(summaryBlock, "wrong") || "0", 10) || questions.filter(q => q.isCorrect === false).length;
+        const unattempted = parseInt(this.extractTag(summaryBlock, "unattempted") || "0", 10) || questions.filter(q => q.isCorrect === null).length;
+
+        logger.info({ subject, total, correct, wrong, unattempted }, 'Correction parsed');
+
+        return {
+            questions,
+            subject,
+            summary: { total, correct, wrong, unattempted },
+        };
     }
 }
 
